@@ -4,8 +4,36 @@
 
 #include "modules/esp-mqtt/mqtt_proto.h"
 
+// IO buffers
+static struct mqtt_buffer w_buffer = {}, r_buffer = {};
+
 #define mqtt_header(type, flag_3, flag_2, flag_1, flag_0) \
   (((type) << 4) | ((flag_3) << 3) | ((flag_2) << 2) | ((flag_1) << 1) | (flag_0))
+
+
+/******************************************************************************
+ * Reset/Initialize buffers
+ *
+ *******************************************************************************/
+static void ICACHE_FLASH_ATTR
+reset_buffer(bool write, bool read)
+{
+  if(write)
+  {
+     // Init if not
+     if (w_buffer.data == NULL)
+        w_buffer.data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE);
+      w_buffer.offset = 0;
+  }
+
+  if(read)
+  {
+    // Init if not
+    if (r_buffer.data == NULL)
+      r_buffer.data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE * 2);
+    r_buffer.offset = 0;
+  }
+}
 
 /******************************************************************************
  * Write into MQTT buffer
@@ -14,9 +42,8 @@
 static void ICACHE_FLASH_ATTR
 write_buffer(struct mqtt_buffer *buffer, uint8_t *data, int data_len)
 {
-  uint8_t i = 0;
-  for(i = 0; i < data_len; ++i)
-    buffer->data[buffer->offset++] = data[i];
+  os_memcpy(buffer->data + buffer->offset, data, data_len);
+  buffer->offset += data_len;
 }
 
 /******************************************************************************
@@ -87,7 +114,7 @@ encode_mbi(int number, uint8_t *data)
  *
  *******************************************************************************/
 static uint16_t ICACHE_FLASH_ATTR
-decode_uint16(uint8_t *buff, uint8_t offset)
+decode_uint16(uint8_t *buff, uint16_t offset)
 {
    return (buff[offset] << 8) | buff[offset + 1];
 }
@@ -97,7 +124,7 @@ decode_uint16(uint8_t *buff, uint8_t offset)
  *
  *******************************************************************************/
 static uint8_t ICACHE_FLASH_ATTR
-encode_uint16(uint16_t number, uint8_t *buff, uint8_t offset)
+encode_uint16(uint16_t number, uint8_t *buff, uint16_t offset)
 {
     buff[offset++] = number >> 8;      // MSB
     buff[offset++] = number & 0xff;    // LSB
@@ -137,7 +164,7 @@ encode_str(struct mqtt_buffer *buffer, uint8_t *str, int str_len)
 static struct mqtt_message* ICACHE_FLASH_ATTR
 decode_publish(struct mqtt_buffer *buffer)
 {
-  uint8_t buffer_len = buffer->offset;
+  uint16_t buffer_len = buffer->offset;
   struct mqtt_message *msg = NULL;
   msg = (struct mqtt_message *) os_malloc(sizeof(struct mqtt_message));
 
@@ -162,21 +189,45 @@ decode_publish(struct mqtt_buffer *buffer)
 }
 
 /******************************************************************************
+ * Encodes MQTT Pub Ack
+ *
+ *******************************************************************************/
+static void ICACHE_FLASH_ATTR
+mqtt_puback(struct mqtt_connection *conn)
+{
+  // Reset Write Buffer
+  reset_buffer(true, false);
+
+  // MQTT packet
+  uint8_t packet[] = { mqtt_header(MQTT_PUBACK, 0, 0, 0, 0), 0 };
+  write_buffer(&w_buffer, packet, sizeof(packet));
+
+  // Send
+  conn->send_cb(conn, w_buffer.data, w_buffer.offset);
+}
+
+
+/******************************************************************************
  * Encodes MQTT Connect
  *
  *******************************************************************************/
 void ICACHE_FLASH_ATTR
 mqtt_connect(struct mqtt_connection *conn)
 {
-  // Buffer
-  struct mqtt_buffer buffer = {
-    .data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE)
-  };
+  // Reset Write Buffer
+  reset_buffer(true, false);
 
   // Packet headers
   uint8_t fixed_hd;
   uint8_t remlen_len, remlen[4];
-  uint8_t flags = 0b11000010; // user + password + clean session
+  /*
+      7   |     6    |     5      |   4    3   |    2    |     1     |    0
+     user |    pwd   |   wretain  |    wqos    |  wflag  |  session  | reserved
+  */
+  uint8_t flags = 0b11000000;
+  if(conn->clearSession)
+    flags |= 0x02;
+
   uint8_t variable_hd[10] = {0x00, 0x04, 'M', 'Q', 'T', 'T', 4, flags, 0x00, 0x00};
 
   // Reset packet ids
@@ -195,17 +246,17 @@ mqtt_connect(struct mqtt_connection *conn)
   encode_uint16(conn->kalive, variable_hd, 8);
 
   // MQTT fixed header
-  write_buffer(&buffer, &fixed_hd, 1);
-  write_buffer(&buffer, remlen, remlen_len);
+  write_buffer(&w_buffer, &fixed_hd, 1);
+  write_buffer(&w_buffer, remlen, remlen_len);
   // MQTT variable header
-  write_buffer(&buffer, variable_hd, sizeof(variable_hd));
+  write_buffer(&w_buffer, variable_hd, sizeof(variable_hd));
   // MQTT payload
-  encode_str(&buffer, conn->client_id, cli_len);
-  encode_str(&buffer, conn->username, user_len);
-  encode_str(&buffer, conn->password, pwd_len);
+  encode_str(&w_buffer, conn->client_id, cli_len);
+  encode_str(&w_buffer, conn->username, user_len);
+  encode_str(&w_buffer, conn->password, pwd_len);
 
   // Send
-  conn->send_cb(conn, buffer.data, buffer.offset);
+  conn->send_cb(conn, w_buffer.data, w_buffer.offset);
 }
 
 /******************************************************************************
@@ -215,17 +266,15 @@ mqtt_connect(struct mqtt_connection *conn)
 void ICACHE_FLASH_ATTR
 mqtt_disconnect(struct mqtt_connection *conn)
 {
-  // Buffer
-  struct mqtt_buffer buffer = {
-    .data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE)
-  };
+  // Reset Write Buffer
+  reset_buffer(true, false);
 
   // MQTT packet
   uint8_t packet[] = { mqtt_header(MQTT_DISCONNECT, 0, 0, 0, 0), 0 };
-  write_buffer(&buffer, packet, sizeof(packet));
+  write_buffer(&w_buffer, packet, sizeof(packet));
 
   // Send
-  conn->send_cb(conn, buffer.data, buffer.offset);
+  conn->send_cb(conn, w_buffer.data, w_buffer.offset);
 }
 
 /******************************************************************************
@@ -236,10 +285,8 @@ mqtt_disconnect(struct mqtt_connection *conn)
 void ICACHE_FLASH_ATTR
 mqtt_subscribe(struct mqtt_connection *conn, char *topic, enum mqtt_qos qos)
 {
-  // Buffer
-  struct mqtt_buffer buffer = {
-    .data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE)
-  };
+  // Reset Write Buffer
+  reset_buffer(true, false);
 
   // Packet headers
   uint8_t fixed_hd;
@@ -258,17 +305,17 @@ mqtt_subscribe(struct mqtt_connection *conn, char *topic, enum mqtt_qos qos)
   encode_packet_id(conn, variable_hd);
 
   // MQTT fixed header
-  write_buffer(&buffer, &fixed_hd, 1);
-  write_buffer(&buffer, remlen, remlen_len);
+  write_buffer(&w_buffer, &fixed_hd, 1);
+  write_buffer(&w_buffer, remlen, remlen_len);
   // MQTT variable header
-  write_buffer(&buffer, variable_hd, sizeof(variable_hd));
+  write_buffer(&w_buffer, variable_hd, sizeof(variable_hd));
   // MQTT payload
   uint8_t qos_data = qos;
-  encode_str(&buffer, topic, topic_len);
-  write_buffer(&buffer, &qos_data, qos_len);
+  encode_str(&w_buffer, topic, topic_len);
+  write_buffer(&w_buffer, &qos_data, qos_len);
 
   // Send
-  conn->send_cb(conn, buffer.data, buffer.offset);
+  conn->send_cb(conn, w_buffer.data, w_buffer.offset);
 }
 
 /******************************************************************************
@@ -279,10 +326,8 @@ mqtt_subscribe(struct mqtt_connection *conn, char *topic, enum mqtt_qos qos)
 void ICACHE_FLASH_ATTR
 mqtt_unsubscribe(struct mqtt_connection *conn, char *topic)
 {
-  // Buffer
-  struct mqtt_buffer buffer = {
-    .data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE)
-  };
+  // Reset Write Buffer
+  reset_buffer(true, false);
 
   // Packet headers
   uint8_t fixed_hd;
@@ -300,29 +345,30 @@ mqtt_unsubscribe(struct mqtt_connection *conn, char *topic)
   encode_packet_id(conn, variable_hd);
 
   // MQTT fixed header
-  write_buffer(&buffer, &fixed_hd, 1);
-  write_buffer(&buffer, remlen, remlen_len);
+  write_buffer(&w_buffer, &fixed_hd, 1);
+  write_buffer(&w_buffer, remlen, remlen_len);
   // MQTT variable header
-  write_buffer(&buffer, variable_hd, sizeof(variable_hd));
+  write_buffer(&w_buffer, variable_hd, sizeof(variable_hd));
   // MQTT payload
-  encode_str(&buffer, topic, topic_len);
+  encode_str(&w_buffer, topic, topic_len);
 
   // Send
-  conn->send_cb(conn, buffer.data, buffer.offset);
+  conn->send_cb(conn, w_buffer.data, w_buffer.offset);
 }
 
 /******************************************************************************
  * Encodes MQTT Publish
- * This implementation will always use Qos 0 (at most once) delivery
+ * This implementation doesn't support Qos 2 (exactly once) delivery
  *
  *******************************************************************************/
 void ICACHE_FLASH_ATTR
-mqtt_publish(struct mqtt_connection *conn, char *topic, uint8_t *message)
+mqtt_publish(struct mqtt_connection *conn, char *topic, uint8_t *message, enum mqtt_qos qos)
 {
-  // Buffer
-  struct mqtt_buffer buffer = {
-    .data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE)
-  };
+  if(qos == MQTT_QOS_2)
+    return;
+
+  // Reset Write Buffer
+  reset_buffer(true, false);
 
   // Packet headers
   uint8_t fixed_hd;
@@ -333,19 +379,19 @@ mqtt_publish(struct mqtt_connection *conn, char *topic, uint8_t *message)
   uint16_t message_len = os_strlen(message);
   const int8_t strs_len = 2 * 2; // final payload includes 2 bytes for each string
 
-  // Fixed header
-  fixed_hd = mqtt_header(MQTT_PUBLISH, 0, MQTT_QOS_0, MQTT_QOS_0, 0);
+  // Fixed header (dup = 0, retain = 0)
+  fixed_hd = mqtt_header(MQTT_PUBLISH, 0, qos, qos, 0);
   remlen_len = encode_mbi(topic_len + message_len + strs_len, remlen);
 
   // MQTT fixed header
-  write_buffer(&buffer, &fixed_hd, 1);
-  write_buffer(&buffer, remlen, remlen_len);
+  write_buffer(&w_buffer, &fixed_hd, 1);
+  write_buffer(&w_buffer, remlen, remlen_len);
   // MQTT payload
-  encode_str(&buffer, topic, topic_len);
-  encode_str(&buffer, message, message_len);
+  encode_str(&w_buffer, topic, topic_len);
+  encode_str(&w_buffer, message, message_len);
 
   // Send
-  conn->send_cb(conn, buffer.data, buffer.offset);
+  conn->send_cb(conn, w_buffer.data, w_buffer.offset);
 }
 
 /******************************************************************************
@@ -355,23 +401,20 @@ mqtt_publish(struct mqtt_connection *conn, char *topic, uint8_t *message)
 void ICACHE_FLASH_ATTR
 mqtt_ping(struct mqtt_connection *conn)
 {
-  // Buffer
-  struct mqtt_buffer buffer = {
-    .data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE)
-  };
+  // Reset Write Buffer
+  reset_buffer(true, false);
 
   // MQTT packet
   uint8_t packet[] = { mqtt_header(MQTT_PINGREQ, 0, 0, 0, 0), 0 };
-  write_buffer(&buffer, packet, sizeof(packet));
+  write_buffer(&w_buffer, packet, sizeof(packet));
 
   // Send
-  conn->send_cb(conn, buffer.data, buffer.offset);
+  conn->send_cb(conn, w_buffer.data, w_buffer.offset);
 }
 
 /******************************************************************************
  * Parses MQTT packet
- * This implementation ignores packets used on QoS 1 (at least once) and
- * QoS 2 (exactly once) message delivery control
+ * This implementation ignores packets used on QoS 2 (exactly once)
  *
  *******************************************************************************/
 void ICACHE_FLASH_ATTR
@@ -383,30 +426,42 @@ mqtt_parse_packet(struct mqtt_connection *conn, uint8_t *data, int data_len)
   print_packet(data, data_len);
   #endif
 
-  // Buffer
-  struct mqtt_buffer buffer = {
-    .data = (uint8_t*) os_malloc(MQTT_BUFFER_SIZE)
-  };
+  // Reset Read Buffer
+  reset_buffer(false, true);
 
-  // Fixed header
+  // Packet type (upper nibble on 1st byte)
   uint8_t packet_type = data[0] >> 4;
-  uint8_t *offset = os_malloc(sizeof(uint8_t));
-  uint8_t remlen_len = decode_mbi(&data[1], offset);
 
-  // Variable header + Payload
-  write_buffer(&buffer, data + 1 + *offset, remlen_len);
+  // Remaining lenght (2nd to 5th byte)
+  uint8_t *remlen_offset = os_malloc(sizeof(uint8_t));
+  int remlen_len = decode_mbi(&data[1], remlen_offset);
+
+  // Buffer Variable header + Payload
+  write_buffer(&r_buffer, data + 1 + *remlen_offset, remlen_len);
 
   // Callback
   switch (packet_type)
   {
     case MQTT_CONNACK:
-      if (buffer.data[1] == 0x00)
+      // Return code (2nd byte Variable header)
+      if (r_buffer.data[1] == 0x00)
         conn->connect_cb(conn);
       break;
 
     case MQTT_PUBLISH:
-      message = decode_publish(&buffer);
+      message = decode_publish(&r_buffer);
       conn->message_cb(conn, message);
+
+      // QoS to PUBACK (2nd bit on 1st byte Variable header)
+      enum mqtt_qos qos = (r_buffer.data[0] & 0x06);
+      if(qos == MQTT_QOS_1)
+        mqtt_puback(conn);
+      break;
+
+    // Server packets (no client action required)
+    case MQTT_SUBACK:
+    case MQTT_UNSUBACK:
+    case MQTT_PINGRESP:
       break;
   }
 }

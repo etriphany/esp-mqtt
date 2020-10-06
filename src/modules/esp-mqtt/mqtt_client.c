@@ -25,7 +25,7 @@ mqtt_connected(struct mqtt_connection *mqtt_conn)
 {
   struct mqtt_client *cli = (struct mqtt_client *) mqtt_conn->reverse;
   // Register ping timer
-  cli->ping_timer = (os_timer_t *)os_zalloc(sizeof(os_timer_t));
+  cli->ping_timer = (os_timer_t *) os_zalloc(sizeof(os_timer_t));
   os_timer_setfn(cli->ping_timer, ping_timer_cb, cli);
   os_timer_arm(cli->ping_timer, cli->mqtt_conn.kalive * 1000, 1);
   // Call user callback
@@ -134,10 +134,10 @@ find_host_cb(const char *name, ip_addr_t *ip, void *arg)
 
   // TCP socket setup
   cli->tcp_conn = NULL;
-  cli->tcp_conn = (struct espconn *)os_zalloc(sizeof(struct espconn));
+  cli->tcp_conn = (struct espconn *) os_zalloc(sizeof(struct espconn));
   cli->tcp_conn->type = ESPCONN_TCP;
   cli->tcp_conn->state = ESPCONN_NONE;
-  cli->tcp_conn->proto.tcp = (esp_tcp *)os_zalloc(sizeof(esp_tcp));
+  cli->tcp_conn->proto.tcp = (esp_tcp *) os_zalloc(sizeof(esp_tcp));
   cli->tcp_conn->proto.tcp->local_port = espconn_port();
   cli->tcp_conn->proto.tcp->remote_port = cli->host_port;
   espconn_regist_connectcb(cli->tcp_conn, socket_connected_cb);
@@ -151,7 +151,7 @@ find_host_cb(const char *name, ip_addr_t *ip, void *arg)
 
   // Connect to host
   #if MQTT_DEBUG
-  os_printf("MQTT: Connecting to " IPSTR "...\n", IP2STR(ip));
+  os_printf("MQTT: Connecting to "IPSTR"...\n", IP2STR(ip));
   #endif
   os_memcpy(cli->tcp_conn->proto.tcp->remote_ip, &ip->addr, 4);
   if(cli->secure)
