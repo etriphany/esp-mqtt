@@ -3,7 +3,7 @@
 
 #include "mqtt_proto.h"
 
-#define MQTT_DEBUG      0
+#define MQTT_DEBUG      1
 
 struct mqtt_client {
   bool secure;

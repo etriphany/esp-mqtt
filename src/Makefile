@@ -128,4 +128,8 @@ clean:
 trace:
 	tail -f /dev/ttyUSB0
 
+reborn:
+	$(ESPTOOL) --chip esp8266 --port $(ESPPORT) erase_flash
+	$(ESPTOOL) --chip esp8266 --port $(ESPPORT) write_flash 0x3FB000 $(SDK_BASE)/bin/blank.bin 0x3FC000 $(SDK_BASE)/bin/esp_init_data_default_v08.bin 0x3FE000 $(SDK_BASE)/bin/blank.bin
+
 $(foreach bdir,$(BUILD_DIR),$(eval $(call compile-objects,$(bdir))))

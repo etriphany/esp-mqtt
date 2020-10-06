@@ -25,17 +25,37 @@ static const partition_item_t at_partition_table[] = {
 #define SSID         "CHANGE_ME"
 #define PASSWORD	   "CHANGE_ME"
 
+static uint16_t counter = 0;
+
 void ICACHE_FLASH_ATTR
 on_message(struct mqtt_connection *conn, struct mqtt_message *message)
 {
-  os_printf("MQTT: msg: %s %s\n", message->topic, (char *)message->data);
+  const uint16_t message_len = os_strlen((char*) message->data);
+  ++counter;
+  os_printf("(%s) -> %s\r\n", message->topic, (char *)message->data);
+
+  if (os_strncmp("reset", (char*) message->data, message_len) == 0)
+    counter = 0;
+
+  if (os_strncmp("publish", (char*) message->data, message_len) == 0)
+  {
+    char* buf = "";
+    os_sprintf(buf, "%d", counter);
+    mqtt_publish(conn, "counter", buf, MQTT_QOS_0);
+  }
+
+  if (os_strncmp("unsubscribe", (char*) message->data, message_len) == 0)
+    mqtt_unsubscribe(conn, "commands/counter");
+
+  if (os_strncmp("disconnect", (char*) message->data, message_len) == 0)
+    mqtt_disconnect(conn);
 }
 
 void ICACHE_FLASH_ATTR
 on_connected(struct mqtt_connection *conn)
 {
-  os_printf("MQTT: Client connect\n");
-  mqtt_subscribe(conn, "commands", MQTT_QOS_0);
+  os_printf("MQTT: Client connected\r\n");
+  mqtt_subscribe(conn, "commands/counter", MQTT_QOS_0);
 }
 
 // Client config
