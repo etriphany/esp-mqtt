@@ -22,63 +22,35 @@ static const partition_item_t at_partition_table[] = {
     { SYSTEM_PARTITION_CUSTOMER_PRIV_PARAM,             SYSTEM_PARTITION_CUSTOMER_PRIV_PARAM_ADDR,          0x1000},
 };
 
-#define SSID         "CHANGE_ME"
-#define PASSWORD	   "CHANGE_ME"
-
-static uint16_t counter = 0;
+static struct mqtt_client mqtt_client;
 
 void ICACHE_FLASH_ATTR
 on_message(struct mqtt_connection *conn, struct mqtt_message *message)
 {
-  const uint16_t message_len = os_strlen((char*) message->data);
-  ++counter;
-  os_printf("(%s) -> %s\r\n", message->topic, (char *)message->data);
-
-  if (os_strncmp("reset", (char*) message->data, message_len) == 0)
-    counter = 0;
-
-  if (os_strncmp("publish", (char*) message->data, message_len) == 0)
-  {
-    char* buf = "";
-    os_sprintf(buf, "%d", counter);
-    mqtt_publish(conn, "counter", buf, MQTT_QOS_0);
-  }
-
-  if (os_strncmp("unsubscribe", (char*) message->data, message_len) == 0)
-    mqtt_unsubscribe(conn, "commands/counter");
-
-  if (os_strncmp("disconnect", (char*) message->data, message_len) == 0)
-    mqtt_disconnect(conn);
+  // Fallback handler
+  LOGGER("fallback handler received %s", message->data);
 }
 
 void ICACHE_FLASH_ATTR
 on_connected(struct mqtt_connection *conn)
 {
-  os_printf("MQTT: Client connected\r\n");
-  mqtt_subscribe(conn, "commands/counter", MQTT_QOS_0);
+  LOGGER("MQTT: Client connected\r\n");
+  // Handler for "commands/relay/+"
+  mqtt_client_subscribe(conn, "commands/relay/+", MQTT_QOS_0, ({
+    void cb(struct mqtt_connection *conn, struct mqtt_message *message) {
+      LOGGER("/print handler received: %s", message->data);
+    }
+    cb;
+  }));
 }
-
-// Client config
-struct mqtt_client client = {
-  .secure = TRUE,
-  .host_name = "cloudmqtt.com",
-  .host_port = 27558,
-  .user_connected_cb = on_connected,
-  .user_message_cb = on_message,
-  .mqtt_conn = {
-    .client_id = "CLIENT_ID",
-    .username = "CLIENT_ID",
-    .password = "PASSWORD",
-    .kalive = 60
-  }
-};
 
 void ICACHE_FLASH_ATTR
 on_wifi_event(System_Event_t *event)
 {
   switch (event->event) {
   case EVENT_STAMODE_GOT_IP:
-    mqtt_client_connect(&client);
+    // Connect MQTT client
+    mqtt_client_connect(&mqtt_client);
     break;
   }
 }
@@ -92,11 +64,27 @@ void ICACHE_FLASH_ATTR
 user_init(void)
 {
   uart_init(115200, 115200);
-  wifi_set_event_handler_cb(on_wifi_event);
 
+  // Setup MQTT client
+  mqtt_client = (struct mqtt_client) {
+    .secure = TRUE,
+    .host_name = MQTT_HOST,
+    .host_port = MQTT_PORT,
+    .user_connect_cb = on_connected,
+    .user_message_cb = on_message,
+    .mqtt_conn = {
+      .client_id = MQTT_CLIENT_ID,
+      .username = MQTT_CLIENT_ID,
+      .password = MQTT_PASSWORD,
+      .kalive = 60
+    }
+  };
+
+  // Setup and connect to wifi
+  wifi_set_event_handler_cb(on_wifi_event);
   struct station_config config = {
-    .ssid = SSID,
-    .password = PASSWORD,
+    .ssid = WIFI_SSID,
+    .password = WIFI_PASSWORD,
   };
   wifi_set_opmode(STATION_MODE);
   wifi_station_set_config(&config);

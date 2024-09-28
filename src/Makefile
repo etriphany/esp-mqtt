@@ -1,109 +1,200 @@
 # Makefile for ESP8266 projects
-# ---------------------------------
+# https://makefiletutorial.com/
 
-# Output directors to store intermediate compiled files
-# relative to the project directory
+
+#=======================================================
+# Output directories (RELATIVE PATH)
+
 BUILD_BASE	= build
 FW_BASE		= firmware
 
-# base directory for the compiler
-XTENSA_TOOLS_ROOT ?= /home/user/esp-open-sdk/xtensa-lx106-elf/bin
+#=======================================================
+# Target application name
+TARGET		= app
 
-# base directory of the ESP8266 SDK package, absolute
-SDK_BASE	?= /home/user/ESP8266_NONOS_SDK-3.0.1
+#=======================================================
+# SDK directories and tools (ABSOLUTE PATH)
 
-# esptool.py path and port
+XTENSA_BASE	?= /home/user/esp-open-sdk/xtensa-lx106-elf/bin
+SDK_BASE	?= /home/user/ESP8266_NONOS_SDK-3.0.4
 ESPTOOL		?= esptool.py
-ESPPORT		?= 	/dev/ttyUSB0
+GEN_APPBIN	:= ${SDK_BASE}/tools/gen_appbin.py
+FOTA_BOOT	:= ${SDK_BASE}/bin/boot_v1.7.bin
 
-# name for the target project
-TARGET = app
+#=======================================================
+# SDK directories and tools (RELATIVE PATH)
 
-# which modules (subdirectories) of the project to include in compiling
-MODULES = user driver modules/esp-mqtt
-
-EXTRA_INCDIR    = include
-
-# libraries used in this project, mainly provided by the SDK (some by Xtensa)
-LIBS		= c gcc hal pp phy net80211 lwip wpa pwm upgrade main ssl crypto m json
-
-# compiler flags using during compilation of source files
-CFLAGS		= -Os -g -O2 -Wpointer-arith -Wundef -Werror -Wl,-EL -fno-inline-functions -nostdlib -mlongcalls -mtext-section-literals  -D__ets__ -DICACHE_FLASH
-
-# linker flags used to generate the main object file
-LDFLAGS		= -nostdlib -Wl,--no-check-sections -u call_user_start -Wl,-static
-
-# linker script used for the above linkier step
-LD_SCRIPT	= eagle.app.v6.ld
-
-# various paths from the SDK used in this project
 SDK_LIBDIR	= lib
 SDK_LDDIR	= ld
-SDK_INCDIR	= include include/json
+SDK_INCDIR	= include include/json third_party/include
 
-# we create two different files for uploading into the flash
-# these are the names and options to generate them
-FW_FILE_1_ADDR	= 0x00000
-FW_FILE_2_ADDR	= 0x10000
-CA_CERT_ADDR 		= 0x77000
+#=======================================================
+# Port connected to ESP (ABSOLUTE PATH)
 
-# select which tools to use as compiler, librarian and linker
-CC		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
-AR		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-ar
-LD		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
+ESP_PORT	?= /dev/ttyUSB0
 
+# which modules (subdirectories) of the project to include in compiling
+MODULES 		= user \
+				driver \
+				modules/esp-mqtt \
+				modules/utils
 
+#=======================================================
+# Directory for includes (RELATIVE PATH)
 
-####
-#### no user configurable options below here
-####
+XTRA_INCDIR	= include
+
+#=======================================================
+# Libraries used in this project, mainly provided by the SDK
+#
+# Proprietary
+#   	Espressif SDK: (libc.a, libcc.a, libhal.a, libpp.a, libmain.a, libphy.a)
+#  		Xtensa Tool Chain: (libm.a)
+# Open NOT shared on SDK:
+#		FreeBSD WiFi stack: (libnet80211.a)
+#		WPA Supplicant: (libcrypto.a, libwpa.a)
+# Open shared on SDK (thirdy-party directory):
+#		LwIP: (liblwip.a):
+#		Mbed TLS: (libmbedtls.a)
+#		SICS Json: (libjson.a)
+
+LIBS		= c \
+			gcc \
+			hal \
+			pp \
+			main \
+			phy \
+			net80211 \
+			wpa \
+			crypto \
+			lwip \
+			mbedtls \
+			json \
+			m
+
+#=======================================================
+# Compiler flags using during compilation of source files
+
+CFLAGS		= -Os \
+			-g \
+			-O2 \
+			-Wpointer-arith \
+			-Wundef \
+			-Werror \
+			-Wl,-EL \
+			-fno-inline-functions \
+			-nostdlib \
+			-mlongcalls \
+			-mtext-section-literals \
+			-D__ets__ \
+			-DICACHE_FLASH \
+			-DLWIP_OPEN_SRC
+
+#=======================================================
+# Linker flags used to generate the main object file
+
+LDFLAGS		= -nostdlib \
+			-Wl,--no-check-sections \
+			-u call_user_start \
+			-Wl,-static
+
+#=======================================================
+# Linker scripts used for the above linkier step
+
+# Linker for NON-FOTA user.bin
+LD_SCRIPT_APP_0		= eagle.app.v6.ld
+# Linker for FOTA user1.bin (ESP8266 12e SIZE_MAP = 4)
+LD_SCRIPT_APP_1		= eagle.app.v6.new.1024.app1.ld
+# Linker for FOTA user2.bin (ESP8266 12e SIZE_MAP = 4)
+LD_SCRIPT_APP_2		= eagle.app.v6.new.1024.app2.ld
+
+#=======================================================
+# Names (adress) used to generate/upload files to flash
+
+# NON-FOTA app.bin or FOTA boot.bin
+FW_MAIN_ADDR	= 0x00000
+# NON-FOTA irom0text.bin
+FW_APP_0_ADDR	= 0x10000
+# FOTA user1.bin (4KB)
+FW_APP_1_ADDR	= 0x01000
+# FOTA user2.bin (512KB + 4KB)
+FW_APP_2_ADDR	= 0x81000
+
+#=======================================================
+# Select which tools to use as compiler, librarian and linker
+
+CC			:= $(XTENSA_BASE)/xtensa-lx106-elf-gcc
+AR			:= $(XTENSA_BASE)/xtensa-lx106-elf-ar
+LD			:= $(XTENSA_BASE)/xtensa-lx106-elf-gcc
+OBJCOPY		:= $(XTENSA_BASE)/xtensa-lx106-elf-objcopy
+OBJDUMP		:= $(XTENSA_BASE)/xtensa-lx106-elf-objdump
+
+##########################################################
+# No user configurable options below here
+
 SRC_DIR		:= $(MODULES)
 BUILD_DIR	:= $(addprefix $(BUILD_BASE)/,$(MODULES))
 
 SDK_LIBDIR	:= $(addprefix $(SDK_BASE)/,$(SDK_LIBDIR))
 SDK_INCDIR	:= $(addprefix -I$(SDK_BASE)/,$(SDK_INCDIR))
 
-SRC		:= $(foreach sdir,$(SRC_DIR),$(wildcard $(sdir)/*.c))
-OBJ		:= $(patsubst %.c,$(BUILD_BASE)/%.o,$(SRC))
+SRC			:= $(foreach sdir,$(SRC_DIR),$(wildcard $(sdir)/*.c))
+OBJ			:= $(patsubst %.c,$(BUILD_BASE)/%.o,$(SRC))
 LIBS		:= $(addprefix -l,$(LIBS))
 APP_AR		:= $(addprefix $(BUILD_BASE)/,$(TARGET)_app.a)
-TARGET_OUT	:= $(addprefix $(BUILD_BASE)/,$(TARGET).out)
+APP_OUT		:= $(addprefix $(BUILD_BASE)/,$(TARGET).out)
 
-LD_SCRIPT	:= $(addprefix -T$(SDK_BASE)/$(SDK_LDDIR)/,$(LD_SCRIPT))
+# Point ld script to selected APP (0,1 or 2)
+LD_SCRIPT	:= $(addprefix -T$(SDK_BASE)/$(SDK_LDDIR)/,$(LD_SCRIPT_APP_$(PARAM_APP)))
 
-INCDIR	:= $(addprefix -I,$(SRC_DIR))
-EXTRA_INCDIR	:= $(addprefix -I,$(EXTRA_INCDIR))
+INCDIR			:= $(addprefix -I,$(SRC_DIR))
+XTRA_INCDIR		:= $(addprefix -I,$(XTRA_INCDIR))
 MODULE_INCDIR	:= $(addsuffix /include,$(INCDIR))
 
-FW_FILE_1	:= $(addprefix $(FW_BASE)/,$(FW_FILE_1_ADDR).bin)
-FW_FILE_2	:= $(addprefix $(FW_BASE)/,$(FW_FILE_2_ADDR).bin)
+FW_BOOT		:= $(addprefix $(FW_BASE)/,$(FW_MAIN_ADDR).bin)
+# Point app firmware to selected APP (0,1 or 2)
+FW_APP		:= $(addprefix $(FW_BASE)/,$(FW_APP_$(PARAM_APP)_ADDR).bin)
 
-V ?= $(VERBOSE)
-ifeq ("$(V)","1")
-Q :=
-vecho := @true
+# Boot mode
+ifeq ($(PARAM_APP), 0)
+	BOOT_MODE := 0
 else
-Q := @
-vecho := @echo
+	BOOT_MODE := 2
 endif
 
+# Verbose control
+V ?= $(VERBOSE)
+ifeq ("$(V)","1")
+	Q :=
+	vecho := @true
+else
+	Q := @
+	vecho := @echo
+endif
+
+# ???
 vpath %.c $(SRC_DIR)
 
+# Macro to compile source file
 define compile-objects
 $1/%.o: %.c
 	$(vecho) "CC $$<"
-	$(Q) $(CC) $(INCDIR) $(MODULE_INCDIR) $(EXTRA_INCDIR) $(SDK_INCDIR) $(CFLAGS) -c $$< -o $$@
+	$(Q) $(CC) $(INCDIR) $(MODULE_INCDIR) $(XTRA_INCDIR) $(SDK_INCDIR) $(CFLAGS) -c $$< -o $$@
 endef
 
-.PHONY: all checkdirs flash clean trace
+# Required or gen_appbin.py will fail
+export COMPILE=gcc
 
-all: checkdirs $(TARGET_OUT) $(FW_FILE_1) $(FW_FILE_2)
+# Makefile targets
+.PHONY: all checkdirs image flash clean trace reborn
 
-$(FW_BASE)/%.bin: $(TARGET_OUT) | $(FW_BASE)
+all: checkdirs $(APP_OUT) $(FW_BOOT) $(FW_APP)
+
+$(FW_BASE)/%.bin: $(APP_OUT) | $(FW_BASE)
 	$(vecho) "FW $(FW_BASE)/"
-	$(Q) $(ESPTOOL) elf2image -o $(FW_BASE)/ $(TARGET_OUT)
+	$(Q) $(ESPTOOL) elf2image -o $(FW_BASE)/ $(APP_OUT)
 
-$(TARGET_OUT): $(APP_AR)
+$(APP_OUT): $(APP_AR)
 	$(vecho) "LD $@"
 	$(Q) $(LD) -L$(SDK_LIBDIR) $(LD_SCRIPT) $(LDFLAGS) -Wl,--start-group $(LIBS) $(APP_AR) -Wl,--end-group -o $@
 
@@ -119,17 +210,37 @@ $(BUILD_DIR):
 $(FW_BASE):
 	$(Q) mkdir -p $@
 
-flash: $(FW_FILE_1) $(FW_FILE_2)
-	$(ESPTOOL) --chip esp8266 --port $(ESPPORT) write_flash $(FW_FILE_1_ADDR) $(FW_FILE_1) $(FW_FILE_2_ADDR) $(FW_FILE_2)
+image: $(FW_BOOT) $(FW_APP)
+	$(vecho) "Splitting app.out into sub-components"
+	@$(OBJDUMP) -x -s $(APP_OUT) > $(FW_BASE)/app.dump
+	@$(OBJDUMP) -S $(APP_OUT) > $(FW_BASE)/app.S
+	@$(OBJCOPY) --only-section .text -O binary $(APP_OUT) $(FW_BASE)/eagle.app.v6.text.bin
+	@$(OBJCOPY) --only-section .data -O binary $(APP_OUT) $(FW_BASE)/eagle.app.v6.data.bin
+	@$(OBJCOPY) --only-section .rodata -O binary $(APP_OUT) $(FW_BASE)/eagle.app.v6.rodata.bin
+	@$(OBJCOPY) --only-section .irom0.text -O binary $(APP_OUT) $(FW_BASE)/eagle.app.v6.irom0text.bin
+	$(vecho) "Build app bin"
+	$(Q) cp -f $(GEN_APPBIN) $(FW_BASE)
+	$(Q) cp -f $(APP_OUT) $(FW_BASE)/eagle.app.out
+	$(Q) (cd $(FW_BASE); python gen_appbin.py eagle.app.out ${BOOT_MODE} 0 0 4 0)
+
+flash: $(FW_BOOT) $(FW_APP)
+	@if [ $(PARAM_APP) -eq 0 ] ; then \
+		echo "Flash NON-FOTA firmware" ; \
+		$(ESPTOOL) --chip esp8266 --port $(ESP_PORT) write_flash $(FW_MAIN_ADDR) $(FW_BASE)/eagle.app.flash.bin $(FW_APP_$(PARAM_APP)_ADDR) $(FW_BASE)/eagle.app.v6.irom0text.bin -fs 4MB; \
+	else \
+		echo "Flash FOTA firmware" ; \
+		$(ESPTOOL) --chip esp8266 --port $(ESP_PORT) write_flash $(FW_MAIN_ADDR) $(FOTA_BOOT) $(FW_APP_$(PARAM_APP)_ADDR) $(FW_BASE)/eagle.app.flash.bin -fs 4MB; \
+	fi
 
 clean:
 	$(Q) rm -rf $(FW_BASE) $(BUILD_BASE)
 
 trace:
-	tail -f /dev/ttyUSB0
+	$(ESPTOOL) --chip esp8266 --port $(ESP_PORT) chip_id
+	tail -f $(ESP_PORT)
 
 reborn:
-	$(ESPTOOL) --chip esp8266 --port $(ESPPORT) erase_flash
-	$(ESPTOOL) --chip esp8266 --port $(ESPPORT) write_flash 0x3FB000 $(SDK_BASE)/bin/blank.bin 0x3FC000 $(SDK_BASE)/bin/esp_init_data_default_v08.bin 0x3FE000 $(SDK_BASE)/bin/blank.bin
+	$(ESPTOOL) --chip esp8266 --port $(ESP_PORT) erase_flash
+	$(ESPTOOL) --chip esp8266 --port $(ESP_PORT) write_flash 0x3FB000 $(SDK_BASE)/bin/blank.bin 0x3FC000 $(SDK_BASE)/bin/esp_init_data_default_v08.bin 0x3FE000 $(SDK_BASE)/bin/blank.bin -fs 4MB
 
 $(foreach bdir,$(BUILD_DIR),$(eval $(call compile-objects,$(bdir))))
