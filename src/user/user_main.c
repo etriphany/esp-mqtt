@@ -38,7 +38,7 @@ on_connected(struct mqtt_connection *conn)
   // Handler for "commands/relay/+"
   mqtt_client_subscribe(conn, "commands/relay/+", MQTT_QOS_0, ({
     void cb(struct mqtt_connection *conn, struct mqtt_message *message) {
-      LOGGER("/print handler received: %s", message->data);
+      LOGGER("/commands/relay/+ handler received: %s", message->data);
     }
     cb;
   }));
