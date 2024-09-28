@@ -12,9 +12,23 @@ Compact and reliable [MQTT](http://mqtt.org/) client for IoT projects based on _
 * Self contained, no external libraries
 
 # Features
-  * Supports MQTT QoS 0 (stateless)
+  * Supports MQTT QoS 0 and 1
   * Supports MQTT over SSL
   * Publish
   * Subscribe
   * Unsubscribe
-  * Heart beats (pings)
+  * Last will
+  * Lambda handlers
+
+# Build Example
+The project includes a Makefile that can be used to flash into an ESP8266
+Select the target flash address using PARAM_APP
+
+- 0 = Non FOTA (single firmware)
+- 1 = Fota app adress 1
+- 2 = Fota app address 2
+
+```sh
+  cd src
+  make PARAM_APP=0 && make image PARAM_APP=0 && make flash PARAM_APP=0
+```
