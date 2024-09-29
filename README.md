@@ -12,20 +12,33 @@ Compact and reliable [MQTT](http://mqtt.org/) client for IoT projects based on _
 * Self contained, no external libraries
 
 # Features
-  * Supports MQTT QoS 0 and 1
-  * Supports MQTT over SSL
-  * Publish
-  * Subscribe
-  * Unsubscribe
-  * Last will
-  * Lambda handlers
+Major MQTT V4 featues:
+  * Authentication
+  * Clean session flag
+  * Client identifier
+  * Keep alive
+  * Last will and testament
+  * TLS encryption
+  * QoS levels
+    - At most once `QoS 0`
+  * Topic name matching
+    - Multi-level wildcard `#`
+    - Single-level wildcart `+`
+    - Exact match
+
+Additional features:
+  * Message subscription router
+    * Single handler per client
+    * Single handler per subscription
+    * Fallback handler
+  * MQTT packet printer
 
 # Build Example
 The project includes a Makefile that can be used to flash into an ESP8266
 Select the target flash address using PARAM_APP
 
 - 0 = Non FOTA (single firmware)
-- 1 = Fota app adress 1
+- 1 = Fota app address 1
 - 2 = Fota app address 2
 
 ```sh
