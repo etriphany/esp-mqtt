@@ -6,7 +6,8 @@
 #include <osapi.h>
 #include "mqtt_proto.h"
 
-#define MQTT_DEBUG      1
+#define MQTT_DEBUG         1
+#define MQTT_DEBUG_PACKET  1
 
 struct mqtt_client {
   bool secure;

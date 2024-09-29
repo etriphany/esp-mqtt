@@ -29,7 +29,6 @@
 
 // MQTT
 // ---------------------------
-#define MQTT_DEBUG_PACKET                             1
 #define MQTT_HOST                                     "cloudmqtt.com"
 #define MQTT_PORT                                      27558
 #define MQTT_CLIENT_ID                                "MQTT_USER"
